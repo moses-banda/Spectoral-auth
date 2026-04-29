@@ -17,14 +17,21 @@ export default {
           clear: '#f4f4f4',
           nir: '#6a040f',
         },
+        // Lumen warm palette
+        lumen: {
+          warm:  '#D4A276',
+          peach: '#E8A87C',
+          teal:  '#0B7A8A',
+          navy:  '#0F1729',
+        },
         // Clean light laboratory theme
         lab: {
-          bg:       '#f4f6f9',
+          bg:       '#faf8f5',
           panel:    '#ffffff',
-          elevated: '#eef1f5',
+          elevated: '#f5f0eb',
           border:   '#dce1e8',
-          accent:   '#0a8f6c',
-          'accent-dim': '#0a8f6c18',
+          accent:   '#0B7A8A',
+          'accent-dim': '#0B7A8A18',
           secondary:'#5b4fc7',
           muted:    '#6b7a8d',
           text:     '#1a2332',
@@ -32,7 +39,8 @@ export default {
       },
       fontFamily: {
         mono: ['JetBrains Mono', 'Share Tech Mono', 'monospace'],
-        display: ['Orbitron', 'sans-serif'],
+        display: ['Inter', 'Outfit', 'sans-serif'],
+        sans: ['Inter', 'system-ui', 'sans-serif'],
       },
       animation: {
         'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',

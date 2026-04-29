@@ -4,12 +4,11 @@
 
 @layer base {
   html, body {
-    background: linear-gradient(135deg, #eef2f7 0%, #e8edf5 40%, #f0ecf5 70%, #eef2f7 100%);
+    background: linear-gradient(135deg, #faf8f5 0%, #f5f0eb 40%, #f0ecf5 70%, #faf8f5 100%);
     color: #1a2332;
     min-height: 100vh;
   }
 
-  /* Subtle pattern overlay */
   body {
     background-attachment: fixed;
     position: relative;
@@ -20,8 +19,8 @@
     position: fixed;
     inset: 0;
     background-image:
-      radial-gradient(circle at 20% 20%, rgba(10, 143, 108, 0.04) 0%, transparent 50%),
-      radial-gradient(circle at 80% 80%, rgba(91, 79, 199, 0.04) 0%, transparent 50%);
+      radial-gradient(circle at 20% 20%, rgba(212, 162, 118, 0.06) 0%, transparent 50%),
+      radial-gradient(circle at 80% 80%, rgba(11, 122, 138, 0.05) 0%, transparent 50%);
     pointer-events: none;
     z-index: 0;
   }
@@ -31,7 +30,7 @@
     z-index: 1;
   }
 
-  /* Scrollbar styling */
+  /* Scrollbar */
   ::-webkit-scrollbar { width: 6px; }
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb { background: #c0c9d4; border-radius: 3px; }
@@ -39,13 +38,13 @@
 
   /* Focus rings */
   *:focus-visible {
-    outline: 2px solid #0a8f6c;
+    outline: 2px solid #0B7A8A;
     outline-offset: 2px;
   }
 
-  /* Selection color */
+  /* Selection */
   ::selection {
-    background: rgba(10, 143, 108, 0.15);
+    background: rgba(11, 122, 138, 0.15);
     color: #1a2332;
   }
 }
@@ -69,8 +68,8 @@
   }
 
   .lab-label {
-    @apply font-display text-xs tracking-[0.2em] uppercase;
-    background: linear-gradient(135deg, #0a8f6c, #0b7a8a);
+    @apply text-xs tracking-[0.2em] uppercase;
+    background: linear-gradient(135deg, #D4A276, #0B7A8A);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
@@ -81,16 +80,16 @@
     @apply text-lab-muted text-xs tracking-wide;
   }
 
-  /* Accent button style */
+  /* Accent button */
   .btn-accent {
     @apply px-5 py-2 rounded-lg font-bold text-white;
-    background: linear-gradient(135deg, #0a8f6c, #0b7a8a);
-    box-shadow: 0 2px 8px rgba(10, 143, 108, 0.25);
+    background: linear-gradient(135deg, #0B7A8A, #0a8f6c);
+    box-shadow: 0 2px 8px rgba(11, 122, 138, 0.25);
     transition: all 0.2s ease;
   }
 
   .btn-accent:hover {
-    box-shadow: 0 4px 16px rgba(10, 143, 108, 0.35);
+    box-shadow: 0 4px 16px rgba(11, 122, 138, 0.35);
     transform: translateY(-1px);
   }
 
@@ -99,5 +98,13 @@
     cursor: not-allowed;
     transform: none;
     box-shadow: none;
+  }
+
+  /* Lumen brand gradient text */
+  .lumen-gradient-text {
+    background: linear-gradient(135deg, #D4A276, #E8A87C, #0B7A8A);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
   }
 }

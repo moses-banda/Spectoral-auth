@@ -1,156 +1,110 @@
-# SpecAuth Frontend
+# Lumen — Spectral Memory Aid
 
-React web app for the SpecAuth spectral paint authenticator.
-Connects to the ESP32 over Web Bluetooth, stores reference profiles in Supabase,
-and generates AI descriptions via Gemini 2.5 Flash.
+A handheld spectral identifier that helps people with dementia recognize objects in their environment through voice. Built with a 10-channel AS7341 spectral sensor, Web Bluetooth, and AI.
 
----
+## How It Works
 
-## Architecture
+### For Caregivers: Enroll Objects
+1. Tap the microphone → speak: *"This is grandpa's blue coffee mug"*
+2. Hold the device near the object → scan 3 times
+3. AI extracts name, owner, and a warm description
+4. Saved to the database with a spectral fingerprint
 
-```
-┌─────────────┐   BLE    ┌──────────────────┐   HTTPS   ┌──────────────┐
-│ XIAO ESP32  │ ───────▶ │  React Frontend  │ ────────▶ │   Supabase   │
-│  SpecAuth   │          │  (Vite + Tailwind)│          │  + pgvector  │
-└─────────────┘          └──────────────────┘          └──────────────┘
-                                   │
-                                   │ via Edge Function
-                                   ▼
-                         ┌──────────────────┐
-                         │  Gemini 2.5 Flash │
-                         └──────────────────┘
-```
+### For Patients: Identify Objects  
+1. Point the device at any enrolled object
+2. Press the scan button
+3. Lumen speaks aloud: *"This is grandpa's blue coffee mug. He uses it every morning."*
 
-Everything except the ESP32 lives in the browser. No traditional backend server —
-Supabase + one Edge Function handles storage and AI calls.
+## Tech Stack
 
----
+| Layer      | Technology                                      |
+|------------|------------------------------------------------|
+| Frontend   | React 18, Vite, Tailwind CSS 3, Framer Motion |
+| Database   | Supabase (PostgreSQL + pgvector)               |
+| Hardware   | XIAO ESP32-S3 + AS7341 + BH1750 via Web BLE   |
+| Voice In   | Web Speech Recognition API (Chrome built-in)   |
+| Voice Out  | Web Speech Synthesis API (all browsers)        |
+| AI         | Gemini 2.0 Flash (via Supabase Edge Function)  |
+| Matching   | kNN over pgvector cosine similarity            |
 
-## One-time setup
+## Pages
 
-### 1. Install dependencies
+| Route       | Purpose                              | User      |
+|-------------|--------------------------------------|-----------|
+| `/`         | Dashboard + quick actions            | Caregiver |
+| `/enroll`   | 3-step enrollment wizard with voice  | Caregiver |
+| `/identify` | Patient kiosk mode (dark, huge UI)   | Patient   |
+| `/library`  | Browse, search, edit, delete objects | Caregiver |
+| `/capture`  | CNN training data collection         | Developer |
+
+## Setup
 
 ```bash
+# Install dependencies
 npm install
-```
 
-### 2. Create a Supabase project
-
-Go to [supabase.com](https://supabase.com), create a free project, and grab:
-- Project URL
-- Anon (public) key
-
-Both are on the **Project Settings → API** page.
-
-### 3. Set up environment variables
-
-```bash
+# Configure environment
 cp .env.local.example .env.local
-```
+# Edit with your Supabase URL + anon key
 
-Edit `.env.local` and paste your Supabase URL + anon key.
+# Run the schema migration
+# Copy supabase/schema.sql → Supabase SQL Editor → Run
 
-### 4. Create the database schema
-
-In Supabase: **SQL Editor → New query**. Paste the contents of
-`supabase/schema.sql` and run it. This creates the `profiles` and
-`scans` tables plus the `match_profiles` RPC function.
-
-### 5. Deploy the Gemini Edge Function
-
-You need the [Supabase CLI](https://supabase.com/docs/guides/cli):
-
-```bash
-npm install -g supabase
-supabase login
-supabase link --project-ref YOUR_PROJECT_REF
-
-# Set the Gemini API key (get one free at https://aistudio.google.com/apikey)
-supabase secrets set GEMINI_API_KEY=your_gemini_key_here
-
-# Deploy the function
-supabase functions deploy describe-paint
-```
-
----
-
-## Running
-
-```bash
+# Start dev server
 npm run dev
 ```
 
-Opens at `http://localhost:5173`.
+### Optional: Deploy AI Edge Function
+```bash
+supabase login
+supabase link --project-ref YOUR_REF
+supabase secrets set GEMINI_API_KEY=AIza...
+supabase functions deploy enroll-object
+```
 
-**Browser requirement:** Web Bluetooth only works in Chrome, Edge, and Opera on
-desktop, or Chrome on Android. **iOS Safari is not supported** — Apple refuses
-to ship Web Bluetooth.
+Without the Edge Function, enrollment falls back to local transcript parsing.
 
----
-
-## File structure
+## Project Structure
 
 ```
 src/
-├── App.jsx                 Main layout + state orchestration
-├── main.jsx                React entry point
-│
-├── ble/
-│   ├── uuids.js            BLE UUIDs (must match firmware)
-│   ├── protocol.js         Parse scan payloads, encode profiles
-│   └── useBLE.js           React hook: connection lifecycle
-│
-├── supabase/
-│   ├── client.js           Supabase SDK init
-│   ├── profiles.js         CRUD + findMatches (pgvector)
-│   └── scans.js            Historical scan logging
-│
-├── ai/
-│   └── describe.js         Call Edge Function for descriptions
-│
+├── App.jsx                    ← Router + BLE state
+├── main.jsx                   ← React entry point
+├── pages/
+│   ├── HomePage.jsx           ← Dashboard
+│   ├── EnrollPage.jsx         ← 3-step enrollment wizard
+│   ├── IdentifyPage.jsx       ← Patient kiosk mode
+│   └── LibraryPage.jsx        ← Object management
 ├── components/
-│   ├── ConnectButton.jsx   BLE connect/disconnect UI
-│   ├── SpectrumChart.jsx   Live 10-channel bar chart
-│   ├── VerdictCard.jsx     Pass/fail/uncertain card
-│   ├── RegisterModal.jsx   Capture + describe + save new profile
-│   ├── MatchResults.jsx    Ranked leaderboard of closest profiles
-│   ├── DeltaChart.jsx      Per-channel difference viz
-│   ├── ProfileGallery.jsx  Grid of saved reference profiles
-│   └── HuntMode.jsx        Warmer/colder live hunt UI
-│
-└── lib/
-    ├── wavelengthColor.js  Channel → true color mapping
-    └── cosineSimilarity.js Client-side similarity + delta math
-
-supabase/
-├── schema.sql              Database schema (run in SQL editor)
-└── functions/
-    └── describe-paint/
-        └── index.ts        Secure Gemini proxy (deploy via CLI)
+│   ├── CapturePage.jsx        ← CNN data collection (legacy)
+│   ├── ConnectButton.jsx
+│   ├── SpectrumChart.jsx
+│   └── ...
+├── ble/
+│   ├── useBLE.js              ← Web Bluetooth hook
+│   ├── protocol.js            ← BLE packet parser
+│   └── uuids.js               ← Service/characteristic UUIDs
+├── supabase/
+│   ├── client.js              ← Supabase client
+│   ├── objects.js             ← Object CRUD + identification
+│   ├── scans.js               ← Legacy scan history
+│   └── dataset.js             ← CNN training data
+├── hooks/
+│   ├── useSpeechRecognition.js ← Voice input
+│   └── useSpeechSynthesis.js   ← Voice output
+├── ai/
+│   └── enroll.js              ← Gemini metadata extraction
+├── lib/
+│   ├── cosineSimilarity.js    ← Client-side similarity
+│   └── wavelengthColor.js     ← Channel→color mapping
+└── styles/
+    └── index.css              ← Tailwind + Lumen theme
 ```
 
----
+## The Vision
 
-## Feature map
+**Dementia Assistance:** Tag everyday objects once, recognize them forever. Voice in, voice out — no screens needed for the patient.
 
-| Feature | Status | Component |
-|---|---|---|
-| BLE connection | ✅ | `ConnectButton` + `useBLE` |
-| Live spectrum chart | ✅ | `SpectrumChart` |
-| Pass/fail verdict | ✅ | `VerdictCard` |
-| Register reference | ✅ | `RegisterModal` |
-| AI descriptions | ✅ | `ai/describe.js` + Edge Function |
-| Ranked matches | ✅ | `MatchResults` |
-| Delta comparison | ✅ | `DeltaChart` |
-| Profile gallery | ✅ | `ProfileGallery` |
-| Hunt Mode | ✅ | `HuntMode` |
-| Scan history | 🚧 | (logged in DB, UI TBD) |
-| Photo upload | 🚧 | (schema ready, UI TBD) |
+**Robotic Perception:** Same spectral fingerprinting gives robots material-level sensing that cameras can't provide. A robot with Lumen can distinguish a real apple from a plastic one.
 
----
-
-## Author
-
-Moses Bandabilt — Vanderbilt University ECE / CS '28
-
-Part of the ES 3890 Design Discovery project.
+Same technology, two applications. Build once, pitch twice.
