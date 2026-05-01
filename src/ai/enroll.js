@@ -1,89 +1,115 @@
 // ═══════════════════════════════════════════════════════════════════
-// enroll.js — AI metadata extraction for object enrollment
+// enroll.js — AI metadata extraction using OpenAI
 //
-// Calls a Supabase Edge Function that uses Gemini to extract
-// structured metadata from a voice transcript + spectral data.
-//
-// If no Edge Function is deployed, falls back to local parsing.
+// Takes a voice transcript and extracts structured object metadata
+// for enrollment. Uses OpenAI's GPT model to parse natural speech.
 // ═══════════════════════════════════════════════════════════════════
 
-import { supabase } from '../supabase/client';
+const OPENAI_API_KEY = import.meta.env.VITE_OPENAI_API_KEY;
 
 /**
  * Extract structured object metadata from a voice transcript.
- *
- * Tries: Supabase Edge Function → local fallback
  *
  * @param {string}   transcript - What the caregiver said
  * @param {number[]} spectrum   - 10-channel spectral data
  * @returns {{ name: string, owner: string, description: string, category: string }}
  */
 export async function extractObjectMetadata(transcript, spectrum) {
-  // Try Edge Function first (keeps API key server-side)
-  try {
-    const { data, error } = await supabase.functions.invoke('enroll-object', {
-      body: { transcript, spectrum },
-    });
-
-    if (!error && data?.name) {
-      return {
-        name:        data.name,
-        owner:       data.owner || 'shared',
-        description: data.description || '',
-        category:    data.category || 'other',
-      };
+  // Try OpenAI first, fall back to local parsing
+  if (OPENAI_API_KEY) {
+    try {
+      return await extractViaOpenAI(transcript, spectrum);
+    } catch (e) {
+      console.warn('[AI] OpenAI call failed, using local fallback:', e.message);
     }
-  } catch (e) {
-    console.warn('[AI] Edge function unavailable, using local fallback:', e.message);
   }
 
-  // ── Local fallback — simple transcript parsing ────────────────
   return parseTranscriptLocally(transcript);
 }
 
 /**
- * Fallback: extract name, owner, and description from the transcript
- * using basic heuristics. No AI needed.
+ * Use OpenAI to extract structured metadata from natural speech.
+ */
+async function extractViaOpenAI(transcript, spectrum) {
+  const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${OPENAI_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: 'gpt-4o-mini',
+      temperature: 0.3,
+      response_format: { type: 'json_object' },
+      messages: [
+        {
+          role: 'system',
+          content: `You are a memory aid assistant for someone with dementia.
+A caregiver is enrolling a new object by describing it out loud.
+Extract structured metadata from their description.
+
+Respond ONLY with JSON:
+{
+  "name": "short memorable name, 3-5 words max",
+  "owner": "person this belongs to (if mentioned), otherwise 'shared'",
+  "description": "one warm, simple sentence the patient will hear when they scan this object later. Use kind, familiar language. Do NOT start with 'I am sure' or confidence phrases. Just describe the object warmly.",
+  "category": "one of: kitchen, bedroom, bathroom, medication, personal, tool, other"
+}`
+        },
+        {
+          role: 'user',
+          content: `Caregiver said: "${transcript}"${spectrum ? `\nSpectral data: [${spectrum.join(', ')}]` : ''}`
+        }
+      ],
+    }),
+  });
+
+  if (!response.ok) {
+    const err = await response.text();
+    throw new Error(`OpenAI API error: ${response.status} — ${err}`);
+  }
+
+  const result = await response.json();
+  const parsed = JSON.parse(result.choices[0].message.content);
+
+  return {
+    name:        parsed.name || 'Unnamed Object',
+    owner:       parsed.owner || 'shared',
+    description: parsed.description || '',
+    category:    parsed.category || 'other',
+  };
+}
+
+/**
+ * Fallback: extract metadata from transcript using heuristics. No AI needed.
  */
 function parseTranscriptLocally(transcript) {
-  if (!transcript || !transcript.trim()) {
+  if (!transcript?.trim()) {
     return { name: 'Unnamed Object', owner: 'shared', description: '', category: 'other' };
   }
 
   const text = transcript.trim();
 
-  // Try to find owner patterns like "grandpa's", "Mom's", "Sarah's"
+  // Owner detection
   let owner = 'shared';
-  const possessiveMatch = text.match(/(\w+(?:'s|s'))\s/i);
+  const possessiveMatch = text.match(/(\w+)(?:'s|s')\s/i);
   if (possessiveMatch) {
-    owner = possessiveMatch[1].replace(/'s$/i, '').replace(/s'$/i, '');
-    // Capitalize first letter
-    owner = owner.charAt(0).toUpperCase() + owner.slice(1);
+    owner = possessiveMatch[1].charAt(0).toUpperCase() + possessiveMatch[1].slice(1);
   }
 
-  // Try to extract "this is [NAME]" or just use the whole thing as name
+  // Name extraction
   let name = text;
   const thisIsMatch = text.match(/this is (?:(?:the|a|an|my|our|his|her|their)\s+)?(.+)/i);
-  if (thisIsMatch) {
-    name = thisIsMatch[1];
-  }
+  if (thisIsMatch) name = thisIsMatch[1];
 
-  // Clean up: take first sentence for the name, rest is description
+  // Truncate to first sentence, max 6 words
   const sentences = name.split(/[.!?]/).filter(s => s.trim());
-  if (sentences.length > 1) {
-    name = sentences[0].trim();
-  }
-
-  // Truncate name to something reasonable (3-6 words)
+  if (sentences.length > 1) name = sentences[0].trim();
   const words = name.split(/\s+/);
-  if (words.length > 6) {
-    name = words.slice(0, 6).join(' ');
-  }
-
-  // Capitalize the name
+  if (words.length > 6) name = words.slice(0, 6).join(' ');
   name = name.charAt(0).toUpperCase() + name.slice(1);
 
-  // Category guessing from keywords
+  // Category guessing
   const lower = text.toLowerCase();
   let category = 'other';
   if (/kitchen|mug|cup|plate|bowl|kettle|spoon|fork|knife|pot|pan/i.test(lower)) category = 'kitchen';
@@ -93,10 +119,5 @@ function parseTranscriptLocally(transcript) {
   else if (/key|wallet|phone|glasses|watch|remote/i.test(lower)) category = 'personal';
   else if (/tool|hammer|screwdriver|wrench/i.test(lower)) category = 'tool';
 
-  return {
-    name,
-    owner,
-    description: text,
-    category,
-  };
+  return { name, owner, description: text, category };
 }

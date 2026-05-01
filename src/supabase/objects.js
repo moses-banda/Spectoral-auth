@@ -149,12 +149,12 @@ export async function identifyObject(spectrum, limit = 5) {
 
 /**
  * Determine confidence tier from similarity score.
+ * Binary decision: either we're certain (≥99%) or we ask for a rescan.
+ * No guessing. No "I think" language.
  */
 export function getConfidenceTier(similarity) {
-  if (similarity >= 0.95) return { tier: 'sure',    label: "I'm sure this is",    color: 'emerald' };
-  if (similarity >= 0.85) return { tier: 'likely',   label: 'I think this is',     color: 'amber'   };
-  if (similarity >= 0.70) return { tier: 'unsure',   label: "I'm not sure, but maybe", color: 'orange'  };
-  return                         { tier: 'unknown',  label: "I don't recognize this",   color: 'slate'   };
+  if (similarity >= 0.99) return { tier: 'certain', label: 'certain', color: 'emerald' };
+  return                         { tier: 'rescan',  label: 'rescan',  color: 'slate'   };
 }
 
 /**

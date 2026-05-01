@@ -1,34 +1,37 @@
 // ═══════════════════════════════════════════════════════════════════
-// IdentifyPage — Patient kiosk mode
+// IdentifyPage — The patient interface
 //
-// ONE huge button. Scan → identify → speak result aloud.
-// Designed for people with cognitive impairment:
-//   - Huge text, huge buttons
-//   - High contrast dark theme
-//   - Auto-speaks the result
-//   - Minimal UI elements
+// Design principles:
+//   - ONE button. That's it.
+//   - Scan → if confident (≥98%): play audio of what it is
+//   - If not confident: "Please scan again" — no guessing
+//   - No text walls, no confidence %, no abstractions
+//   - Just: object name in big text + warm audio voice
+//
+// Future: this page drives a mini speaker on the physical device.
+// The web interface is just a visual companion.
 // ═══════════════════════════════════════════════════════════════════
 
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ChevronLeft, Volume2, HelpCircle, ScanLine } from 'lucide-react';
+import { ChevronLeft, Volume2 } from 'lucide-react';
 
-import { identifyObject, logIdentification, getConfidenceTier } from '../supabase/objects';
-import { useSpeechSynthesis } from '../hooks/useSpeechSynthesis';
+import { identifyObject, logIdentification } from '../supabase/objects';
+import { speak } from '../ai/speak';
+
+const CONFIDENCE_THRESHOLD = 0.99;
 
 export default function IdentifyPage({ connected, lastScan }) {
   const navigate = useNavigate();
-  const tts = useSpeechSynthesis();
 
-  const [state, setState] = useState('idle'); // idle | scanning | found | unknown
+  const [state, setState]   = useState('idle');  // idle | working | found | rescan
   const [result, setResult] = useState(null);
-  const [confidence, setConfidence] = useState(null);
   const lastScanRef = useRef(null);
 
-  // Watch for incoming scans
+  // Watch for incoming BLE scans
   useEffect(() => {
-    if (!lastScan || state === 'scanning') return;
+    if (!lastScan) return;
     if (lastScanRef.current === lastScan.timestamp) return;
     lastScanRef.current = lastScan.timestamp;
 
@@ -37,157 +40,192 @@ export default function IdentifyPage({ connected, lastScan }) {
   }, [lastScan]);
 
   const handleScan = async (spectrum) => {
-    setState('scanning');
+    setState('working');
+
     try {
       const matches = await identifyObject(spectrum, 3);
 
-      if (matches.length === 0 || matches[0].similarity < 0.5) {
-        setState('unknown');
-        setResult(null);
-        tts.speak("I don't recognize this object. Can someone help?");
+      // No matches at all
+      if (!matches || matches.length === 0) {
+        setState('rescan');
+        speak("I couldn't find a match. Please scan again.");
         return;
       }
 
       const top = matches[0];
-      const tier = getConfidenceTier(top.similarity);
+
+      // Below threshold → don't guess, ask for rescan
+      if (top.similarity < CONFIDENCE_THRESHOLD) {
+        setState('rescan');
+        speak("Please hold the device closer and scan again.");
+        return;
+      }
+
+      // ✅ Confident match — tell grandpa what it is
       setResult(top);
-      setConfidence(tier);
       setState('found');
 
-      // Build speech text
-      const speechText = top.description
-        ? `${tier.label} ${top.name}. ${top.description}`
-        : `${tier.label} ${top.name}.`;
-      tts.speak(speechText);
+      // Build the spoken text — warm and direct, no "I'm sure" prefix
+      const spoken = top.description
+        ? `${top.name}. ${top.description}`
+        : `This is ${top.name}.`;
 
-      // Log the identification
+      speak(spoken);
+
+      // Log it (non-blocking)
       logIdentification(top.id, top.name, top.similarity, spectrum);
     } catch (e) {
       console.error('Identification failed:', e);
-      setState('idle');
+      setState('rescan');
+      speak("Something went wrong. Please try scanning again.");
     }
   };
 
   const handlePlayAgain = () => {
     if (!result) return;
-    const tier = getConfidenceTier(result.similarity);
-    const text = result.description
-      ? `${tier.label} ${result.name}. ${result.description}`
-      : `${tier.label} ${result.name}.`;
-    tts.speak(text);
-  };
-
-  const TIER_COLORS = {
-    sure:    { bg: 'bg-emerald-900/30', border: 'border-emerald-500', text: 'text-emerald-400' },
-    likely:  { bg: 'bg-amber-900/30',   border: 'border-amber-500',   text: 'text-amber-400'   },
-    unsure:  { bg: 'bg-orange-900/30',  border: 'border-orange-500',  text: 'text-orange-400'  },
-    unknown: { bg: 'bg-slate-800/30',   border: 'border-slate-600',   text: 'text-slate-400'   },
+    const spoken = result.description
+      ? `${result.name}. ${result.description}`
+      : `This is ${result.name}.`;
+    speak(spoken);
   };
 
   return (
     <div className="min-h-screen flex flex-col" style={{ background: '#0F1729' }}>
-      {/* Minimal header */}
+      {/* Tiny back button — only family members use this */}
       <div className="flex items-center justify-between px-6 py-4">
-        <button onClick={() => navigate('/')} className="text-slate-400 hover:text-white flex items-center gap-1 text-sm">
-          <ChevronLeft size={16} /> Back
+        <button onClick={() => navigate('/')} className="text-slate-500 hover:text-slate-300 text-xs opacity-40 hover:opacity-100 transition-opacity">
+          <ChevronLeft size={14} />
         </button>
-        <div className="text-slate-500 text-xs">
-          {connected ? '🟢 Connected' : '⚪ Not connected'}
+        <div className="text-slate-600 text-[10px]">
+          {connected ? '●' : '○'}
         </div>
       </div>
 
-      {/* Main content */}
-      <div className="flex-1 flex flex-col items-center justify-center px-8 pb-12">
+      {/* Main content — vertically centered */}
+      <div className="flex-1 flex flex-col items-center justify-center px-8 pb-16">
         <AnimatePresence mode="wait">
-          {/* ═══ IDLE ═══ */}
+
+          {/* ═══ IDLE — waiting for scan ═══ */}
           {state === 'idle' && (
             <motion.div key="idle" className="text-center" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
               <motion.div
-                className="w-40 h-40 rounded-full mx-auto mb-8 flex items-center justify-center border-4 border-lumen-teal/30"
-                style={{ background: 'radial-gradient(circle, rgba(11,122,138,0.2) 0%, transparent 70%)' }}
-                animate={{ scale: [1, 1.03, 1], borderColor: ['rgba(11,122,138,0.3)', 'rgba(11,122,138,0.6)', 'rgba(11,122,138,0.3)'] }}
-                transition={{ duration: 3, repeat: Infinity }}
+                className="w-48 h-48 rounded-full mx-auto mb-10 flex items-center justify-center"
+                style={{
+                  background: 'radial-gradient(circle, rgba(11,122,138,0.15) 0%, rgba(11,122,138,0.05) 50%, transparent 70%)',
+                  border: '3px solid rgba(11,122,138,0.2)',
+                }}
+                animate={{
+                  scale: [1, 1.04, 1],
+                  borderColor: ['rgba(11,122,138,0.2)', 'rgba(11,122,138,0.5)', 'rgba(11,122,138,0.2)'],
+                }}
+                transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
               >
-                <ScanLine size={56} className="text-lumen-teal/60" />
+                <motion.div
+                  className="w-3 h-3 rounded-full bg-[#0B7A8A]"
+                  animate={{ opacity: [0.3, 1, 0.3] }}
+                  transition={{ duration: 2, repeat: Infinity }}
+                />
               </motion.div>
-              <h2 className="text-3xl font-bold text-white mb-3">Ready to Identify</h2>
-              <p className="text-lg text-slate-400">Press the button on the device to scan</p>
+
+              <h2 className="text-2xl font-semibold text-white/90">Ready</h2>
+              <p className="text-slate-400 mt-2">Press the button on the device</p>
+
               {!connected && (
-                <p className="text-sm text-rose-400 mt-4">⚠ Connect your device first</p>
+                <p className="text-rose-400/80 text-sm mt-6">Device not connected</p>
               )}
             </motion.div>
           )}
 
-          {/* ═══ SCANNING ═══ */}
-          {state === 'scanning' && (
-            <motion.div key="scanning" className="text-center" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+          {/* ═══ WORKING — processing ═══ */}
+          {state === 'working' && (
+            <motion.div key="working" className="text-center" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
               <motion.div
-                className="w-40 h-40 rounded-full mx-auto mb-8 flex items-center justify-center border-4 border-amber-400/50"
-                animate={{ scale: [1, 1.1, 1] }}
-                transition={{ duration: 0.8, repeat: Infinity }}
+                className="w-48 h-48 rounded-full mx-auto mb-10 flex items-center justify-center"
+                style={{ border: '3px solid rgba(212,162,118,0.5)' }}
+                animate={{ scale: [1, 1.08, 1], rotate: [0, 5, -5, 0] }}
+                transition={{ duration: 1, repeat: Infinity }}
               >
-                <ScanLine size={56} className="text-amber-400 animate-pulse" />
+                <motion.div
+                  className="w-4 h-4 rounded-full bg-lumen-warm"
+                  animate={{ scale: [1, 1.5, 1] }}
+                  transition={{ duration: 0.5, repeat: Infinity }}
+                />
               </motion.div>
-              <h2 className="text-3xl font-bold text-white">Identifying…</h2>
+              <h2 className="text-2xl font-semibold text-white/90">Looking…</h2>
             </motion.div>
           )}
 
-          {/* ═══ FOUND ═══ */}
-          {state === 'found' && result && confidence && (
-            <motion.div key="found" className="text-center w-full max-w-md" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0 }}>
-              <div className={`rounded-2xl p-8 border-2 ${TIER_COLORS[confidence.tier]?.bg} ${TIER_COLORS[confidence.tier]?.border}`}>
-                <div className={`text-sm uppercase tracking-wider mb-3 ${TIER_COLORS[confidence.tier]?.text}`}>
-                  {confidence.label}
-                </div>
-                <h2 className="text-4xl font-bold text-white mb-4">{result.name}</h2>
+          {/* ═══ FOUND — object identified ═══ */}
+          {state === 'found' && result && (
+            <motion.div key="found" className="text-center w-full max-w-md"
+              initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0 }}>
 
-                {result.description && (
-                  <p className="text-xl text-slate-300 leading-relaxed mb-4">
-                    "{result.description}"
-                  </p>
-                )}
+              {/* Big object name */}
+              <motion.h1
+                className="text-5xl font-bold text-white leading-tight mb-6"
+                initial={{ y: 20 }}
+                animate={{ y: 0 }}
+              >
+                {result.name}
+              </motion.h1>
 
+              {/* Description */}
+              {result.description && (
+                <p className="text-xl text-slate-300 leading-relaxed mb-8">
+                  {result.description}
+                </p>
+              )}
+
+              {/* Owner + location — subtle */}
+              <div className="text-sm text-slate-500 space-y-1 mb-10">
                 {result.owner && result.owner !== 'shared' && (
-                  <div className="text-sm text-slate-400 mb-2">Belongs to: {result.owner}</div>
+                  <div>Belongs to {result.owner}</div>
                 )}
                 {result.location && (
-                  <div className="text-sm text-slate-400">Usually found: {result.location}</div>
+                  <div>Usually found: {result.location}</div>
                 )}
-
-                <div className="mt-6 text-2xl font-mono font-bold text-white">
-                  {(result.similarity * 100).toFixed(0)}%
-                  <span className="text-sm text-slate-400 ml-2">confidence</span>
-                </div>
               </div>
 
-              <div className="flex gap-4 justify-center mt-8">
+              {/* Play again + scan another */}
+              <div className="flex gap-4 justify-center">
                 <motion.button onClick={handlePlayAgain}
-                  className="flex items-center gap-2 px-6 py-3 rounded-xl bg-lumen-teal text-white font-bold text-lg"
+                  className="flex items-center gap-3 px-8 py-4 rounded-2xl bg-[#0B7A8A] text-white font-bold text-lg"
                   whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
-                  <Volume2 size={20} /> Play Again
+                  <Volume2 size={22} /> Hear Again
                 </motion.button>
                 <motion.button onClick={() => { setState('idle'); setResult(null); }}
-                  className="flex items-center gap-2 px-6 py-3 rounded-xl bg-slate-700 text-slate-300 font-bold text-lg"
+                  className="flex items-center gap-3 px-8 py-4 rounded-2xl bg-slate-800 text-slate-300 font-bold text-lg"
                   whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
-                  Scan Another
+                  Next
                 </motion.button>
               </div>
             </motion.div>
           )}
 
-          {/* ═══ UNKNOWN ═══ */}
-          {state === 'unknown' && (
-            <motion.div key="unknown" className="text-center" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              <HelpCircle size={72} className="text-slate-500 mx-auto mb-6" />
-              <h2 className="text-3xl font-bold text-white mb-3">I don't recognize this</h2>
-              <p className="text-lg text-slate-400 mb-8">Can someone help? This object hasn't been enrolled yet.</p>
-              <motion.button onClick={() => setState('idle')}
-                className="px-6 py-3 rounded-xl bg-slate-700 text-white font-bold text-lg"
+          {/* ═══ RESCAN — not confident enough ═══ */}
+          {state === 'rescan' && (
+            <motion.div key="rescan" className="text-center" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+              <motion.div
+                className="w-48 h-48 rounded-full mx-auto mb-10 flex items-center justify-center"
+                style={{ border: '3px solid rgba(212,162,118,0.3)' }}
+                animate={{ borderColor: ['rgba(212,162,118,0.3)', 'rgba(212,162,118,0.6)', 'rgba(212,162,118,0.3)'] }}
+                transition={{ duration: 2, repeat: Infinity }}
+              >
+                <span className="text-5xl">🔄</span>
+              </motion.div>
+
+              <h2 className="text-2xl font-semibold text-white/90 mb-3">Please scan again</h2>
+              <p className="text-slate-400">Hold the device a little closer</p>
+
+              <motion.button
+                onClick={() => setState('idle')}
+                className="mt-8 px-8 py-4 rounded-2xl bg-slate-800 text-white font-bold text-lg"
                 whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
-                Try Again
+                Ready
               </motion.button>
             </motion.div>
           )}
+
         </AnimatePresence>
       </div>
     </div>
